@@ -3,11 +3,14 @@ Description=BusyLight
 After=network.target
 
 [Service]
-User=root
+Type=simple
+User=pi
+Group=pi
 WorkingDirectory=/home/pi/unicorn-busy-server
-ExecStart=python3 server.py
+ExecStart=/home/pi/.env/bin/python /home/pi/unicorn-busy-server/server.py
 Restart=always
 Environment=FLASK_CONFIG=production
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target

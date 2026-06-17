@@ -1,6 +1,6 @@
-#!sudo /bin/bash
-SCRIPT=`realpath -s $0`
-SCRIPTPATH=`dirname $SCRIPT`
+#!/usr/bin/env bash
+SCRIPT=$(realpath -s "$0")
+SCRIPTPATH=$(dirname "$SCRIPT")
 STARTPWD=$PWD
 
 # Define colors and styles
@@ -18,6 +18,10 @@ usage() {
     echo -e "${BOLD}Usage:${NORMAL}"
     echo -e "  -i  --install-dir        Specify where you want to install to"
     echo -e "                           Default is: ${BOLD}${SCRIPTPATH}${NORMAL}"
+    echo -e "  -u  --user               User that will own and run the service"
+    echo -e "                           Default is: ${BOLD}${SUDO_USER:-$USER}${NORMAL}"
+    echo -e "      --venv-dir           Python virtual environment directory"
+    echo -e "                           Default is: ${BOLD}/home/${SUDO_USER:-$USER}/.env${NORMAL}"
     echo -e "  -d  --development        Install for development only (no service installation)"
     echo -e "  -V  --verbose            Shows command output for debugging"
     echo -e "  -v  --version            Shows version details"
@@ -31,27 +35,51 @@ version() {
 
 installSystemdService() {
     show_msg "${GREEN}Installing Systemd Service...${NORMAL}"
-    sed -i "s+WorkingDirectory=/home/pi/unicorn-busy-server+WorkingDirectory=$INSTALL_DIR+g" $INSTALL_DIR/busylight.service
-    if [[ ! -f /etc/systemd/system/busylight.service ]]; then
-        sudo cp busylight.service /etc/systemd/system/busylight.service
-    else
-        sudo sed -i "s+WorkingDirectory=/home/pi/unicorn-busy-server+WorkingDirectory=$INSTALL_DIR+g" /etc/systemd/system/busylight.service
-    fi
+    SERVICE_FILE=$(mktemp)
+    sed \
+        -e "s|^User=.*|User=$INSTALL_USER|g" \
+        -e "s|^Group=.*|Group=$INSTALL_GROUP|g" \
+        -e "s|^WorkingDirectory=.*|WorkingDirectory=$INSTALL_DIR|g" \
+        -e "s|^ExecStart=.*|ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/server.py|g" \
+        "$INSTALL_DIR/busylight.service" > "$SERVICE_FILE"
+
+    sudo install -m 0644 "$SERVICE_FILE" /etc/systemd/system/busylight.service
+    rm "$SERVICE_FILE"
+    sudo systemctl daemon-reload
 }
 
 enableSystemdService() {
     show_msg "${GREEN}Starting Systemd Service...${NORMAL}"
     sudo systemctl enable busylight.service
-    sudo systemctl start busylight.service
+    sudo systemctl restart busylight.service
+}
+
+installPythonDependencies() {
+    show_msg "${GREEN}Creating Python virtual environment at ${BOLD}${VENV_DIR}${NORMAL}${GREEN}...${NORMAL}"
+    if [ ! -d "$VENV_DIR" ]; then
+        sudo -u "$INSTALL_USER" python3 -m venv "$VENV_DIR"
+    fi
+
+    show_msg "${GREEN}Installing needed files from pip into the virtual environment...${NORMAL}"
+    sudo -u "$INSTALL_USER" "$VENV_DIR/bin/python" -m pip install --upgrade pip
+    sudo -u "$INSTALL_USER" "$VENV_DIR/bin/python" -m pip install -r "$INSTALL_DIR/requirements.txt"
 }
 
 VERBOSE=false
 DEVELOPMENT=false
 INSTALL_DIR=$SCRIPTPATH
+INSTALL_USER=${SUDO_USER:-$USER}
+VENV_DIR=""
 while [ "$1" != "" ]; do
     case $1 in
         -i | --install-dir)     shift
                                 INSTALL_DIR=$1
+                                ;;
+        -u | --user)            shift
+                                INSTALL_USER=$1
+                                ;;
+        --venv-dir)             shift
+                                VENV_DIR=$1
                                 ;;
         -d | --development)     DEVELOPMENT=true
                                 ;;
@@ -71,6 +99,11 @@ while [ "$1" != "" ]; do
     esac
     shift
 done
+
+if [ -z "$VENV_DIR" ]; then
+    VENV_DIR="/home/$INSTALL_USER/.env"
+fi
+INSTALL_GROUP=$(id -gn "$INSTALL_USER")
 
 if [ $VERBOSE == "false" ]; then
     exec > /dev/null 
@@ -112,14 +145,15 @@ if [ $FILECHECK == 'false' ]; then
     fi
     show_msg "${GREEN}Cloning files from git using HTTPS to ${BOLD}${INSTALL_DIR}${NORMAL}${GREEN}...${NORMAL}"
     git clone -q https://github.com/aspaviento/unicorn-busy-server.git $INSTALL_DIR
-    chown -R $SUDO_USER:$SUDO_USER $INSTALL_DIR
+    sudo chown -R "$INSTALL_USER:$INSTALL_GROUP" $INSTALL_DIR
     cd $INSTALL_DIR
 fi
 
 case $(uname -s) in
     Linux|GNU*)     case $(lsb_release -si) in
                         Ubuntu | Raspbian)      show_msg "${GREEN}Installing required files from apt...${NORMAL}"
-                                                sudo apt-get install -y python3-pip python3-dev
+                                                sudo apt-get install -y python3-pip python3-dev python3-venv
+                                                installPythonDependencies
                                                 if [[ $DEVELOPMENT == "false" ]]; then
                                                     installSystemdService
                                                     enableSystemdService
@@ -128,8 +162,6 @@ case $(uname -s) in
                         *)                      show_msg "${RED}${BOLD}Unsupported distribution, please consider submitting a pull request to extend the script${NORMAL}"
                                                 exit 1
                     esac
-                    show_msg "${GREEN}Installing needed files from pip...${NORMAL}"
-                    sudo pip3 install -r ./requirements.txt
                     ;;
     *)              show_msg "${RED}${BOLD}Unsupported operating system, please consider submitting a pull request to extend the script${NORMAL}"
                     exit 1

@@ -61,6 +61,8 @@ Compared with the original project, this version includes the following main dif
 * The wrapper avoids importing hardware libraries when running without root permissions, which makes local diagnostics safer.
 * `htmlToRGB` was fixed to use equality comparison and return a valid RGB tuple.
 * `/api/status` no longer fails when CPU temperature cannot be read outside Raspberry Pi environments.
+* The installer now creates and uses a Python virtual environment instead of installing Python packages with `sudo pip`.
+* The systemd service now runs as the target user, `pi` by default, using the Python interpreter from the virtual environment.
 
 # Installation
 
@@ -81,6 +83,12 @@ cat install.sh | more # So you can see the contents of the script a page at time
 sudo bash ./install.sh -V -i /home/pi/unicorn-busy-server
 ```
 
+The installer creates a Python virtual environment for the service user and installs `requirements.txt` there. By default it uses `/home/pi/.env` when run with `sudo` from the `pi` user. You can override this with `--user` and `--venv-dir`:
+
+```bash
+sudo bash ./install.sh -V -i /home/pi/unicorn-busy-server --user pi --venv-dir /home/pi/.env
+```
+
 > **Important**: Currently the script only runs on Raspbian/Ubuntu. Feel free to submit a pull request to extend the PR to support other distributions. Or you can make use of the old installation script: `install-fallback.sh`.
 
 If you want to clone/fork this repo and carry on development on a more sensible machine, you can install the required files without needing to install the service by doing the following:
@@ -99,6 +107,10 @@ Unicorn Busy Server installation script 0.5
 Usage:
   -i  --install-dir        Specify where you want to install to
                            Default is: /home/pi/Development/unicorn-busy-server
+  -u  --user               User that will own and run the service
+                           Default is: pi
+      --venv-dir           Python virtual environment directory
+                           Default is: /home/pi/.env
   -d  --development        Install for development only (no service installation)
   -V  --verbose            Shows command output for debugging
   -v  --version            Shows version details
