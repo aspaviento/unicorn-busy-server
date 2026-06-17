@@ -71,7 +71,7 @@ const normalizeStatus = (value: string | null): StatusKey | null => {
     return null;
   }
 
-  const key = value.toLowerCase() as StatusKey;
+  const key = value.toLowerCase().replace(/[^a-z0-9]/g, '') as StatusKey;
   return statusDetails[key] ? key : null;
 };
 
